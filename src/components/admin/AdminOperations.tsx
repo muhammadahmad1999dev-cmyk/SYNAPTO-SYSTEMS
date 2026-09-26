@@ -1,0 +1,907 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  KeyRound,
+  ChevronRight,
+  Download,
+  Loader2,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  UserRound,
+  Users,
+} from "lucide-react";
+import { useAuth } from "@/components/auth/AuthProvider";
+import {
+  createAdminStaff,
+  deleteAdminDocument,
+  getAdminDocumentDownloadUrl,
+  getAdminApplications,
+  getAdminApplication,
+  getAdminStaff,
+  getAdminUsers,
+  removeAdminStaff,
+  updateAdminPassword,
+  updateAdminApplicationStatus,
+  updateAdminPaymentStatus,
+  uploadAdminDocument,
+  type AdminApplicationRecord,
+  type AdminApplicationDetail,
+  type ApplicationDocument,
+  type AdminStaffRecord,
+  type AdminUserRecord,
+} from "@/lib/api";
+import { confirmToast, showToast } from "@/lib/toast";
+
+function formatDate(value?: string) {
+  return value ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(value)) : "Never";
+}
+
+function FullName({ user }: { user: { firstName: string; lastName: string } }) {
+  return <span>{`${user.firstName} ${user.lastName}`.trim() || "Unnamed user"}</span>;
+}
+
+function normalizeStaff(value: unknown): AdminStaffRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Partial<AdminStaffRecord>;
+    if (typeof record.id !== "string") return [];
+    return [
+      {
+        ...record,
+        id: record.id,
+        email: typeof record.email === "string" ? record.email : "Unknown email",
+        firstName: typeof record.firstName === "string" ? record.firstName : "",
+        lastName: typeof record.lastName === "string" ? record.lastName : "",
+        role: "staff",
+      } as AdminStaffRecord,
+    ];
+  });
+}
+
+function hasSubmittedService(user: AdminUserRecord) {
+  if (typeof user.applicationsCount === "number") return user.applicationsCount > 0;
+  if (Array.isArray(user.applicationIds)) return user.applicationIds.length > 0;
+  if (Array.isArray(user.applications)) return user.applications.length > 0;
+  return true;
+}
+
+function readableKey(key: string) {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeDocumentRole(key: string): "owner" | "member" | "staff" | "admin" | "customer" | null {
+  const normalizedKey = key.toLowerCase();
+
+  if (normalizedKey.includes("owner")) return "owner";
+  if (normalizedKey.includes("member") || normalizedKey === "members") return "member";
+  if (normalizedKey.includes("staff") || normalizedKey === "staffuploads") return "staff";
+  if (normalizedKey.includes("admin")) return "admin";
+  if (normalizedKey.includes("customer")) return "customer";
+
+  return null;
+}
+
+function flattenRoleDocuments(value: unknown, role: "owner" | "member" | "staff" | "admin" | "customer"): ApplicationDocument[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenRoleDocuments(item, role));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const item = value as Record<string, unknown>;
+  const isFileLike = typeof item.path === "string" && (typeof item.id === "string" || typeof item.documentId === "string" || typeof item.name === "string" || typeof item.type === "string");
+
+  if (isFileLike) {
+    return [{
+      id: typeof item.id === "string" ? item.id : undefined,
+      documentId: typeof item.documentId === "string" ? item.documentId : undefined,
+      path: typeof item.path === "string" ? item.path : undefined,
+      url: typeof item.url === "string" ? item.url : null,
+      name: typeof item.name === "string" ? item.name : undefined,
+      documentName: typeof item.documentName === "string" ? item.documentName : typeof item.name === "string" ? item.name : undefined,
+      size: typeof item.size === "number" ? item.size : undefined,
+      type: typeof item.type === "string" ? item.type : undefined,
+      uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : undefined,
+      uploadedBy: typeof item.uploadedByName === "string" ? item.uploadedByName : undefined,
+      uploadedByRole: typeof item.uploadedByRole === "string" ? item.uploadedByRole : role,
+      category: role,
+    }];
+  }
+
+  return Object.entries(item).flatMap(([key, child]) => {
+    const nextRole = normalizeDocumentRole(key) ?? role;
+    return flattenRoleDocuments(child, nextRole);
+  });
+}
+
+function buildRoleDocumentGroups(application: Partial<AdminApplicationRecord> | Partial<AdminApplicationDetail["application"]>) {
+  const root =
+    (application as { documents?: Record<string, unknown> }).documents ??
+    (application as { data?: { documents?: Record<string, unknown> } }).data?.documents ??
+    {};
+
+  const groups: Array<{ key: string; title: string; documents: ApplicationDocument[] }> = [];
+
+  Object.entries(root).forEach(([key, value]) => {
+    const role = normalizeDocumentRole(key) ?? "customer";
+
+    if (role === "member") {
+      if (Array.isArray(value)) {
+        value.forEach((member, index) => {
+          const documents = flattenRoleDocuments(member, "member");
+          if (documents.length) {
+            groups.push({ key: `member-${index + 1}`, title: `Member ${index + 1} documents`, documents });
+          }
+        });
+        return;
+      }
+
+      const documents = flattenRoleDocuments(value, "member");
+      if (documents.length) {
+        groups.push({ key: "member-documents", title: "Member documents", documents });
+      }
+      return;
+    }
+
+    const documents = flattenRoleDocuments(value, role);
+    if (documents.length) {
+      const title = role.charAt(0).toUpperCase() + role.slice(1) + " documents";
+      groups.push({ key: role, title, documents });
+    }
+  });
+
+  return groups;
+}
+
+function matchesDocument(target: ApplicationDocument, candidate: unknown) {
+  if (!candidate || typeof candidate !== "object") return false;
+
+  const document = candidate as Record<string, unknown>;
+  const targetPath = typeof target.path === "string" ? target.path : "";
+  const targetId = typeof target.id === "string" ? target.id : "";
+  const targetName = typeof target.name === "string" ? target.name : typeof target.documentName === "string" ? target.documentName : "";
+
+  const candidatePath = typeof document.path === "string" ? document.path : "";
+  const candidateId = typeof document.id === "string" ? document.id : "";
+  const candidateName = typeof document.name === "string" ? document.name : typeof document.documentName === "string" ? document.documentName : "";
+
+  return Boolean(
+    (targetPath && candidatePath && targetPath === candidatePath)
+      || (targetId && candidateId && targetId === candidateId)
+      || (targetName && candidateName && targetName === candidateName),
+  );
+}
+
+function removeDocumentFromTree(value: unknown, target: ApplicationDocument): unknown {
+  if (Array.isArray(value)) {
+    return value.filter((item) => !matchesDocument(target, item)).map((item) => removeDocumentFromTree(item, target));
+  }
+
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => !matchesDocument(target, item))
+      .map(([key, item]) => [key, removeDocumentFromTree(item, target)]),
+  );
+}
+
+function DocumentCard({ title, documents, applicationId, deletingDocumentId, onRemoveDocument }: { title: string; documents: ApplicationDocument[]; applicationId: string; deletingDocumentId?: string | null; onRemoveDocument?: (document: ApplicationDocument) => void }) {
+  return (
+    <section className="rounded-fm-xl border border-fm-border-soft bg-fm-surface p-3 shadow-[0_8px_20px_rgba(15,23,42,0.04)] md:p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-fm-text-primary">{title}</p>
+        <span className="rounded-full border border-fm-border-soft bg-fm-surface-raised px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-fm-text-secondary">
+          {documents.length} file{documents.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {documents.length ? (
+        <div className="space-y-2">
+          {documents.map((document, index) => {
+            const name = document.documentName ?? document.name ?? document.path?.split("/").pop() ?? "Uploaded document";
+            return (
+              <div key={`${document.path ?? document.id ?? document.url ?? "document"}-${index}`} className="flex items-center justify-between gap-2 rounded-fm-lg border border-fm-border-soft bg-fm-surface-raised px-3 py-2.5 transition hover:border-fm-lime hover:bg-fm-surface">
+                <a
+                  href={getAdminDocumentDownloadUrl(applicationId, document.id ?? document.path ?? document.name ?? document.documentName ?? "")}
+                  download={document.name ?? document.documentName ?? true}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 text-sm text-fm-text-primary"
+                >
+                  <span className="min-w-0 flex-1 break-all text-[13px] leading-snug font-medium">{name}</span>
+                  <Download size={16} className="shrink-0 text-fm-text-secondary" />
+                </a>
+
+                {onRemoveDocument && (
+                  <button
+                    type="button"
+                    disabled={deletingDocumentId === (document.id ?? document.documentId)}
+                    onClick={() => onRemoveDocument(document)}
+                    className="shrink-0 rounded-fm-md border border-fm-danger/30 bg-fm-danger/5 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-fm-danger transition hover:bg-fm-danger/10"
+                  >
+                    {deletingDocumentId === (document.id ?? document.documentId) ? "Removing..." : "Remove"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-xs text-fm-text-secondary">No documents uploaded.</p>
+      )}
+    </section>
+  );
+}
+
+const applicationStatuses = ["submitted", "processing", "completed", "cancelled"] as const;
+const paymentStatuses = ["pending", "paid", "refunded"] as const;
+
+function ApplicationData({ value }: { value: unknown }) {
+  if (Array.isArray(value)) {
+    return (
+      <div className="space-y-2">
+        {value.map((item, index) => (
+          <div key={index} className="rounded-fm-sm border border-fm-border-soft p-2">
+            <ApplicationData value={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (value && typeof value === "object") {
+    return (
+      <div className="divide-y divide-fm-border-soft rounded-fm-md border border-fm-border-soft">
+        {Object.entries(value as Record<string, unknown>).map(([key, item]) => (
+          <div key={key} className="grid gap-1 p-3 sm:grid-cols-[180px_1fr] sm:gap-4">
+            <p className="text-xs font-semibold text-fm-text-secondary">{readableKey(key)}</p>
+            <div className="min-w-0 break-words text-sm text-fm-text-primary">
+              {item && typeof item === "object" ? (
+                <ApplicationData value={item} />
+              ) : (
+                String(item ?? "-")
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <span>{String(value ?? "-")}</span>;
+}
+
+function DocumentUploadDialog({
+  options,
+  documentName,
+  file,
+  submitting,
+  onNameChange,
+  onFileChange,
+  onSubmit,
+  onClose,
+}: {
+  options: string[];
+  documentName: string;
+  file: File | null;
+  submitting: boolean;
+  onNameChange: (value: string) => void;
+  onFileChange: (file: File | null) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-[460px] rounded-fm-xl border border-fm-border bg-fm-surface p-6 shadow-fm-elevated">
+        <div className="flex items-start justify-between gap-4">
+          <div><p className="fm-label">Application document</p><h2 className="mt-1 text-xl font-semibold">Upload document</h2></div>
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-fm-text-secondary hover:text-fm-text-primary">Close</button>
+        </div>
+        <label className="mt-6 block text-sm font-semibold">
+          Document name
+          <select value={documentName} onChange={(event) => onNameChange(event.target.value)} className="mt-2 h-11 w-full rounded-fm-md border border-fm-border bg-fm-graphite-deep px-3 text-sm outline-none focus:border-fm-lime">
+            {options.map((option) => <option key={option} value={option}>{readableKey(option)}</option>)}
+          </select>
+        </label>
+        <label className="mt-4 block text-sm font-semibold">
+          Select file
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => onFileChange(event.target.files?.[0] ?? null)} className="mt-2 w-full rounded-fm-md border border-dashed border-fm-border bg-fm-graphite-deep p-3 text-sm text-fm-text-secondary file:mr-3 file:rounded-fm-sm file:border-0 file:bg-fm-lime file:px-3 file:py-2 file:font-semibold file:text-fm-graphite-deep" />
+        </label>
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-10 rounded-fm-md border border-fm-border px-4 text-sm font-semibold text-fm-text-secondary">Cancel</button>
+          <button type="button" disabled={!file || submitting} onClick={onSubmit} className="inline-flex h-10 items-center gap-2 rounded-fm-md bg-fm-lime px-4 text-sm font-semibold text-fm-graphite-deep disabled:cursor-not-allowed disabled:opacity-50">{submitting && <Loader2 size={15} className="animate-spin" />}{submitting ? "Uploading..." : "Upload document"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-fm-xl border border-fm-border-soft bg-fm-surface p-5 shadow-[0_12px_40px_rgba(0,0,0,0.12)] md:p-6">
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="mt-1 text-sm text-fm-text-secondary">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function UserCard({
+  user,
+  applicationCount,
+  onClick,
+}: {
+  user: AdminUserRecord;
+  applicationCount: number;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") onClick();
+      }}
+      className="cursor-pointer rounded-fm-lg border border-fm-border-soft bg-fm-graphite-deep/40 p-4 text-left transition hover:-translate-y-px hover:border-fm-lime/50 hover:bg-fm-surface-raised"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fm-lime-soft text-sm font-bold text-fm-lime">
+            {user.firstName?.slice(0, 1).toUpperCase() || "U"}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold"><FullName user={user} /></p>
+            <p className="truncate text-xs text-fm-text-secondary">{user.email}</p>
+          </div>
+        </div>
+        <ChevronRight size={18} className="shrink-0 text-fm-text-tertiary" />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-fm-text-secondary">
+        <div><p className="fm-label">Services</p><p className="mt-1 text-sm text-fm-text-primary">{applicationCount} submitted</p></div>
+        <div><p className="fm-label">Last activity</p><p className="mt-1 text-sm text-fm-text-primary">{formatDate(user.latestApplicationAt)}</p></div>
+      </div>
+    </div>
+  );
+}
+
+export function AdminUsersView() {
+  const [users, setUsers] = useState<AdminUserRecord[]>([]);
+  const [applications, setApplications] = useState<AdminApplicationRecord[]>([]);
+  const [selectedUser, setSelectedUser] = useState<AdminUserRecord | null>(null);
+  const [uploadingApplication, setUploadingApplication] = useState<string | null>(null);
+  const [expandedApplicationId, setExpandedApplicationId] = useState<string | null>(null);
+  const [applicationDocuments, setApplicationDocuments] = useState<Record<string, ApplicationDocument[]>>({});
+  const [loadingDocuments, setLoadingDocuments] = useState<string | null>(null);
+  const [updatingApplicationId, setUpdatingApplicationId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [paymentUpdatingId, setPaymentUpdatingId] = useState<string | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+
+  async function loadUsers() {
+    setLoading(true);
+    try {
+      const [userResponse, applicationResponse] = await Promise.all([getAdminUsers(), getAdminApplications()]);
+      setUsers(userResponse.data.users.filter(hasSubmittedService));
+      setApplications(applicationResponse.data.applications);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load users.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    Promise.all([getAdminUsers(), getAdminApplications()])
+      .then(([userResponse, applicationResponse]) => {
+        setUsers(userResponse.data.users.filter(hasSubmittedService));
+        setApplications(applicationResponse.data.applications);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Unable to load users."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function uploadDocument(applicationId: string, file: File | undefined) {
+    if (!file) return;
+    setUploadingApplication(applicationId);
+    setError("");
+    try {
+      await uploadAdminDocument(applicationId, file, file.name);
+      const response = await getAdminApplication(applicationId);
+      const roleDocuments = buildRoleDocumentGroups(response.data.application).flatMap((group) => group.documents);
+      const mergedDocuments = Array.from(
+        [...response.data.signedDocuments, ...roleDocuments].reduce((documentMap, document) => {
+          const key = document.path ?? document.id ?? document.documentName ?? document.name ?? `document-${documentMap.size}`;
+          documentMap.set(key, { ...(documentMap.get(key) ?? {}), ...document });
+          return documentMap;
+        }, new Map<string, ApplicationDocument>()).values(),
+      );
+      setApplicationDocuments((current) => ({
+        ...current,
+        [applicationId]: mergedDocuments,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to upload document.");
+    } finally {
+      setUploadingApplication(null);
+    }
+  }
+
+  async function toggleApplication(applicationId: string) {
+    if (expandedApplicationId === applicationId) {
+      setExpandedApplicationId(null);
+      return;
+    }
+    setExpandedApplicationId(applicationId);
+    if (applicationDocuments[applicationId]) return;
+    setLoadingDocuments(applicationId);
+    try {
+      const response = await getAdminApplication(applicationId);
+      const roleDocuments = buildRoleDocumentGroups(response.data.application).flatMap((group) => group.documents);
+      const mergedDocuments = Array.from(
+        [...response.data.signedDocuments, ...roleDocuments].reduce((documentMap, document) => {
+          const key = document.path ?? document.id ?? document.documentName ?? document.name ?? `document-${documentMap.size}`;
+          documentMap.set(key, { ...(documentMap.get(key) ?? {}), ...document });
+          return documentMap;
+        }, new Map<string, ApplicationDocument>()).values(),
+      );
+      setApplicationDocuments((current) => ({
+        ...current,
+        [applicationId]: mergedDocuments,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load uploaded documents.");
+    } finally {
+      setLoadingDocuments(null);
+    }
+  }
+
+  async function removeApplicationDocument(applicationId: string, document: ApplicationDocument) {
+    const documentIdentifier = document.id ?? document.documentId;
+    const displayName = document.documentName ?? document.name ?? document.path?.split("/").pop() ?? "this document";
+
+    if (!documentIdentifier) {
+      setError("This document cannot be removed because it has no identifier.");
+      return;
+    }
+
+    const confirmed = await confirmToast({
+      title: `Remove "${displayName}"?`,
+      description: "This document will be deleted from the application.",
+      confirmText: "Remove document",
+      cancelText: "Keep it",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+
+    setDeletingDocumentId(documentIdentifier);
+    setError("");
+    try {
+      const response = await deleteAdminDocument(applicationId, documentIdentifier);
+      const returnedDocuments = buildRoleDocumentGroups({
+        ...response.data.application,
+        documents: response.data.documents,
+      }).flatMap((group) => group.documents);
+      setApplicationDocuments((current) => ({
+        ...current,
+        [applicationId]: returnedDocuments,
+      }));
+      setApplications((current) => current.map((application) =>
+        application.id === applicationId
+          ? {
+              ...application,
+              ...response.data.application,
+            }
+          : application,
+      ));
+
+      showToast({
+        title: "Document removed",
+        description: `${displayName} was removed from the application.`,
+        variant: "success",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to remove document.");
+    } finally {
+      setDeletingDocumentId(null);
+    }
+  }
+
+  async function changeApplicationStatus(
+    application: AdminApplicationRecord,
+    status: (typeof applicationStatuses)[number],
+  ) {
+    setUpdatingApplicationId(application.id);
+    setError("");
+    try {
+      const response = await updateAdminApplicationStatus(application.id, status, application.updatedAt);
+      setApplications((current) =>
+        current.map((item) =>
+          item?.id === application.id ? { ...item, ...response.data.application } : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update application status.");
+    } finally {
+      setUpdatingApplicationId(null);
+    }
+  }
+
+  async function changePaymentStatus(application: AdminApplicationRecord, status: (typeof paymentStatuses)[number]) {
+    if (!application.customer?.id) return;
+    setPaymentUpdatingId(application.id);
+    setError("");
+    try {
+      await updateAdminPaymentStatus(application.customer.id, status);
+      setUsers((current) =>
+        current.map((user) =>
+          user.id === application.customer?.id ? { ...user, paymentStatus: status } : user,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update payment status.");
+    } finally {
+      setPaymentUpdatingId(null);
+    }
+  }
+
+  const selectedApplications = selectedUser
+    ? applications.filter((application) => application?.customer?.id === selectedUser.id)
+    : [];
+
+  return (
+    <Panel title="Service users" description="Users who have submitted at least one service application.">
+      {error && <p className="mb-4 rounded-fm-md border border-fm-danger/30 bg-fm-danger/5 p-3 text-sm text-fm-danger">{error}</p>}
+      {loading ? (
+        <p className="py-8 text-center text-sm text-fm-text-secondary">Loading users...</p>
+      ) : !users.length ? (
+        <p className="py-8 text-center text-sm text-fm-text-secondary">No users have submitted a service yet.</p>
+      ) : (
+        selectedUser ? (
+          <div className="rounded-fm-lg border border-fm-lime/30 bg-fm-lime/5 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedUser(null)}
+                  className="mb-4 inline-flex items-center gap-2 text-xs font-semibold text-fm-text-secondary hover:text-fm-text-primary"
+                >
+                  <ArrowLeft size={15} /> Back to users
+                </button>
+                <p className="fm-label">User details</p>
+                <h3 className="mt-1 text-lg font-semibold"><FullName user={selectedUser} /></h3>
+                <p className="text-sm text-fm-text-secondary">{selectedUser.email}</p>
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {selectedApplications.length ? selectedApplications.map((application) => (
+                  <div key={application.id} className="rounded-fm-md border border-fm-border-soft bg-fm-surface p-3">
+                    <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void toggleApplication(application.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <p className="text-sm font-semibold">{application.serviceSlug ?? application.service}</p>
+                        <p className="mt-1 text-xs text-fm-text-secondary">Submitted {formatDate(application.createdAt)}</p>
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 md:grid-cols-3">
+                      <div>
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-fm-text-secondary">Payment</p>
+                        <select
+                          value={users.find((user) => user.id === application.customer?.id)?.paymentStatus ?? "pending"}
+                          disabled={paymentUpdatingId === application.id}
+                          onChange={(event) =>
+                            void changePaymentStatus(
+                              application,
+                              event.target.value as (typeof paymentStatuses)[number],
+                            )
+                          }
+                          className="h-9 w-full rounded-fm-md border border-fm-border bg-fm-surface px-2 text-xs font-medium capitalize outline-none focus:border-fm-lime disabled:opacity-60"
+                        >
+                          {paymentStatuses.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-fm-text-secondary">Status</p>
+                        <select
+                          value={application.status ?? "submitted"}
+                          disabled={updatingApplicationId === application.id}
+                          onChange={(event) =>
+                            void changeApplicationStatus(
+                              application,
+                              event.target.value as (typeof applicationStatuses)[number],
+                            )
+                          }
+                          className="h-9 w-full rounded-fm-md border border-fm-border bg-fm-surface px-2 text-xs font-medium capitalize outline-none focus:border-fm-lime disabled:opacity-60"
+                        >
+                          {applicationStatuses.map((status) => (
+                            <option key={status} value={status}>
+                              {status === "cancelled" ? "Rejected" : status}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-end">
+                        <label className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-fm-md border border-dashed border-fm-border px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-fm-text-secondary hover:border-fm-lime hover:text-fm-lime">
+                          <Upload size={14} />
+                          {uploadingApplication === application.id && <Loader2 size={14} className="animate-spin" />}
+                          {uploadingApplication === application.id ? "Uploading..." : "Upload"}
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            disabled={uploadingApplication === application.id}
+                            onChange={(event) => {
+                              void uploadDocument(application.id, event.target.files?.[0]);
+                              event.currentTarget.value = "";
+                            }}
+                            className="sr-only"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        aria-label="Toggle application details"
+                        onClick={() => void toggleApplication(application.id)}
+                        className="text-lg text-fm-text-tertiary"
+                      >
+                        {expandedApplicationId === application.id ? "−" : "+"}
+                      </button>
+                    </div>
+                    {expandedApplicationId === application.id && (
+                      <div className="mt-4 border-t border-fm-border-soft pt-4">
+                        <p className="fm-label mb-2">Uploaded documents</p>
+                        {loadingDocuments === application.id ? (
+                          <p className="mb-3 text-xs text-fm-text-secondary">Loading documents...</p>
+                        ) : applicationDocuments[application.id]?.length ? (
+                          <div className="mb-4 grid gap-3 lg:grid-cols-2">
+                            {(() => {
+                              const roleGroups = buildRoleDocumentGroups(application);
+                              const grouped = roleGroups.map((group) => ({
+                                ...group,
+                                documents: [
+                                  ...group.documents,
+                                  ...applicationDocuments[application.id].filter((document) => {
+                                    const category = (document.category ?? document.uploadedByRole ?? "customer").toLowerCase();
+                                    return category === group.key || category === group.title.toLowerCase().replace(" documents", "");
+                                  }),
+                                ].filter((document, index, list) => {
+                                  const key = document.path ?? document.id ?? document.documentName ?? document.name ?? `${index}`;
+                                  return list.findIndex((entry) => (entry.path ?? entry.id ?? entry.documentName ?? entry.name ?? `${index}`) === key) === index;
+                                }),
+                              }));
+
+                              const flattened = grouped.flatMap((group) => group.documents);
+                              const fallbackDocuments = applicationDocuments[application.id].filter(
+                                (document) => !flattened.some((entry) => {
+                                  const left = document.path ?? document.id ?? document.documentName ?? document.name ?? "";
+                                  const right = entry.path ?? entry.id ?? entry.documentName ?? entry.name ?? "";
+                                  return left && right && left === right;
+                                }),
+                              );
+
+                              return [
+                                ...grouped.filter((group) => group.documents.length),
+                                ...(fallbackDocuments.length ? [{ key: "uploaded", title: "Uploaded documents", documents: fallbackDocuments }] : []),
+                              ].map((group) => (
+                                <DocumentCard
+                                  key={group.key}
+                                  title={group.title}
+                                  documents={group.documents}
+                                  applicationId={application.id}
+                                  deletingDocumentId={deletingDocumentId}
+                                  onRemoveDocument={(document) => void removeApplicationDocument(application.id, document)}
+                                />
+                              ));
+                            })()}
+                          </div>
+                        ) : (
+                          <p className="mb-3 text-xs text-fm-text-secondary">No uploaded documents.</p>
+                        )}
+                        <p className="fm-label mb-2">Complete application details</p>
+                        <ApplicationData value={application.data} />
+                      </div>
+                    )}
+                </div>
+              )) : <p className="text-sm text-fm-text-secondary">No application details returned for this user.</p>}
+            </div>
+          </div>
+        ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {users.map((user) => {
+              const applicationCount = applications.filter((application) => application?.customer?.id === user.id).length || user.applicationsCount;
+              return <UserCard key={user.id} user={user} applicationCount={applicationCount} onClick={() => setSelectedUser(user)} />;
+            })}
+          </div>
+        </>
+        )
+      )}
+    </Panel>
+  );
+}
+
+export function StaffManagementView() {
+  const [staff, setStaff] = useState<AdminStaffRecord[]>([]);
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "" });
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const loadStaff = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    try {
+      const response = await getAdminStaff();
+      setStaff(normalizeStaff(response.data?.staff));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load staff.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getAdminStaff()
+      .then((response) => {
+        if (!active) return;
+        setStaff(normalizeStaff(response.data?.staff));
+        setError("");
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Unable to load staff.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function addStaff(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await createAdminStaff(form);
+      await loadStaff(false);
+      setForm({ firstName: "", lastName: "", email: "", password: "" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create staff account.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function removeStaff(staffMember: AdminStaffRecord) {
+    if (removingId) return;
+    const confirmed = await confirmToast({
+      title: `Remove ${staffMember.email}?`,
+      description: "This employee will no longer have staff access.",
+      confirmText: "Remove employee",
+      cancelText: "Keep access",
+      variant: "danger",
+    });
+
+    if (!confirmed) return;
+    setRemovingId(staffMember.id);
+    setError("");
+    try {
+      await removeAdminStaff(staffMember.id);
+      await loadStaff(false);
+      showToast({
+        title: "Employee removed",
+        description: `${staffMember.email} has been removed from staff.`,
+        variant: "success",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to remove staff account.");
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <Panel title="Add employee" description="Create a staff account manually. Staff can only access paid users and upload documents.">
+        <form onSubmit={addStaff} className="grid gap-3 md:grid-cols-2">
+          {(["firstName", "lastName", "email", "password"] as const).map((field) => (
+            <input
+              key={field}
+              required
+              type={field === "email" ? "email" : field === "password" ? "password" : "text"}
+              value={form[field]}
+              onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}
+              placeholder={field === "firstName" ? "First name" : field === "lastName" ? "Last name" : field === "email" ? "Employee email" : "Temporary password"}
+              className="h-10 rounded-fm-md border border-fm-border bg-fm-graphite-deep px-3 text-sm outline-none placeholder:text-fm-text-tertiary focus:border-fm-lime"
+            />
+          ))}
+          <button type="submit" disabled={submitting} className="inline-flex h-10 items-center justify-center gap-2 rounded-fm-md bg-fm-lime px-4 text-sm font-semibold text-fm-graphite-deep disabled:opacity-60 md:col-span-2 md:justify-self-start">
+            {submitting ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+            {submitting ? "Creating..." : "Add employee"}
+          </button>
+        </form>
+        {error && <p className="mt-3 text-sm text-fm-danger">{error}</p>}
+      </Panel>
+
+      <Panel title="Current staff" description="Only administrators can add or remove employee accounts.">
+        {loading ? <p className="py-6 text-sm text-fm-text-secondary">Loading staff...</p> : !staff.length ? <p className="py-6 text-sm text-fm-text-secondary">No staff accounts yet.</p> : staff.map((member) => (
+          <div key={member.id} className="flex items-center justify-between gap-4 border-b border-fm-border-soft py-4 last:border-b-0">
+            <div className="flex min-w-0 items-center gap-3"><UserRound size={18} className="shrink-0 text-fm-lime" /><div className="min-w-0"><p className="truncate text-sm font-semibold"><FullName user={member} /></p><p className="truncate text-xs text-fm-text-secondary">{member.email}</p></div></div>
+            <button type="button" disabled={removingId !== null} onClick={() => void removeStaff(member)} className="inline-flex items-center gap-1.5 rounded-fm-md border border-fm-danger/30 px-3 py-2 text-xs font-semibold text-fm-danger hover:bg-fm-danger/10 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 size={14} /> {removingId === member.id ? "Removing..." : "Remove"}</button>
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}
+
+export function AdminSecurityView() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { user } = useAuth();
+
+  async function updatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await updateAdminPassword(currentPassword, newPassword);
+      setMessage(response.data.message || "Password updated successfully.");
+      setCurrentPassword("");
+      setNewPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update password.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Panel title="Security settings" description="Your admin email is fixed. You can update your password at any time.">
+      <div className="mb-5 flex items-center gap-3 rounded-fm-md border border-fm-border-soft bg-fm-graphite-deep p-4"><ShieldCheck size={20} className="text-fm-lime" /><div><p className="text-sm font-semibold">{user?.email}</p><p className="text-xs text-fm-text-secondary">Admin email cannot be changed</p></div></div>
+      <form onSubmit={updatePassword} className="max-w-md space-y-4">
+        <input required type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Current password" className="h-11 w-full rounded-fm-md border border-fm-border bg-fm-graphite-deep px-3 text-sm outline-none focus:border-fm-lime" />
+        <input required minLength={8} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="New password (8+ characters)" className="h-11 w-full rounded-fm-md border border-fm-border bg-fm-graphite-deep px-3 text-sm outline-none focus:border-fm-lime" />
+        {error && <p className="text-sm text-fm-danger">{error}</p>}
+        {message && <p className="text-sm text-fm-success">{message}</p>}
+        <button type="submit" disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-fm-md bg-fm-lime px-4 text-sm font-semibold text-fm-graphite-deep disabled:opacity-60"><KeyRound size={15} />{saving ? "Updating..." : "Update password"}</button>
+      </form>
+    </Panel>
+  );
+}
+
+export { StaffUsersView } from "@/components/staff/StaffUsersView";
