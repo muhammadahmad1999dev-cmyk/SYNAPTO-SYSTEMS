@@ -60,12 +60,7 @@ export default function Footer() {
               <a href="https://www.facebook.com/synaptosystems/" target="_blank" rel="noopener noreferrer" aria-label="Facebook" className={socialClass}>
                 <FacebookLogo size={17} />
               </a>
-              <a href="https://www.linkedin.com/company/synapto-systems/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" className={socialClass}>
-                <LinkedinLogo size={17} />
-              </a>
-              <a href="https://www.youtube.com/@SynaptoSystems" target="_blank" rel="noopener noreferrer" aria-label="YouTube" className={socialClass}>
-                <YoutubeLogo size={17} />
-              </a>
+             
             </div>
           </section>
 
