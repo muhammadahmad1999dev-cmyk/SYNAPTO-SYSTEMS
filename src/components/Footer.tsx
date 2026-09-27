@@ -90,14 +90,14 @@ export default function Footer() {
               Questions about an application or an existing service? Contact our team.
             </p>
             <div className="flex flex-col gap-3 text-[13.5px] font-semibold">
-              <a href="mailto:support@synaptosystems.com" className="hover:text-[var(--fm-text-primary)]">
-                support@synaptosystems.com
+              <a href="mailto:synaptosystemsofficial@gmail.com" className="hover:text-[var(--fm-text-primary)]">
+                synaptosystemsofficial@gmail.com
               </a>
-              <a href="tel:+923164466335" className="hover:text-[var(--fm-text-primary)]">
-                +92 316 4466335
+              <a href="tel:+14064792101" className="hover:text-[var(--fm-text-primary)]">
+                +1 406 4792101
               </a>
-              <a href="tel:+13074436354" className="hover:text-[var(--fm-text-primary)]">
-                +1 307 4436354
+              <a href="tel:+923173070894" className="hover:text-[var(--fm-text-primary)]">
+                +92 317 3070894
               </a>
             </div>
           </section>
