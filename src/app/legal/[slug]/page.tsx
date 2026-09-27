@@ -52,7 +52,7 @@ const policies: Record<string, Policy> = {
         title: "International processing and contact",
         paragraphs: [
           "Because services may involve multiple countries and providers, information may be processed outside your country of residence. Where applicable, we use appropriate safeguards for these transfers.",
-          "For privacy questions or requests, email support@synaptosystems.com and include the email address associated with your account.",
+          "For privacy questions or requests, email synaptosystemsofficial@gmail.com and include the email address associated with your account.",
         ],
       },
     ],
@@ -99,7 +99,7 @@ const policies: Record<string, Policy> = {
         title: "Service changes and questions",
         paragraphs: [
           "We may update website content or service availability as requirements change. Any change to an active order will be communicated through the account or contact details associated with it.",
-          "For questions about these terms or an order, contact support@synaptosystems.com.",
+          "For questions about these terms or an order, contact synaptosystemsofficial@gmail.com.",
         ],
       },
     ],
@@ -111,7 +111,7 @@ const policies: Record<string, Policy> = {
       {
         title: "Requesting a review",
         paragraphs: [
-          "If you believe a charge should be refunded, contact support@synaptosystems.com using the email on your order. Include your order or application reference and a short explanation.",
+          "If you believe a charge should be refunded, contact synaptosystemsofficial@gmail.com using the email on your order. Include your order or application reference and a short explanation.",
           "We review requests against the service scope, order details, work already completed, and costs already committed on your behalf.",
         ],
       },
@@ -149,7 +149,7 @@ const policies: Record<string, Policy> = {
       {
         title: "How to request cancellation",
         paragraphs: [
-          "Email support@synaptosystems.com from the address on your order. Include your order or application reference and ask us to stop the service.",
+          "Email synaptosystemsofficial@gmail.com from the address on your order. Include your order or application reference and ask us to stop the service.",
           "A request is not complete until our team confirms it. If a filing or provider process is time-sensitive, contact us as soon as possible.",
         ],
       },
@@ -204,7 +204,7 @@ const policies: Record<string, Policy> = {
       {
         title: "Changes and questions",
         paragraphs: [
-          "The technologies used on the site may change as services evolve. This page will be updated when those changes affect how browser storage is used. Contact support@synaptosystems.com with questions.",
+          "The technologies used on the site may change as services evolve. This page will be updated when those changes affect how browser storage is used. Contact synaptosystemsofficial@gmail.com with questions.",
         ],
       },
     ],
@@ -347,8 +347,8 @@ export default async function LegalPage({ params }: { params: Promise<{ slug: st
             </nav>
             <p className="mt-6 text-sm leading-6 text-[var(--fm-text-tertiary)]">
               Need help understanding a service or order? Contact{" "}
-              <a className="font-semibold text-[var(--fm-text-primary)] underline" href="mailto:support@synaptosystems.com">
-                support@synaptosystems.com
+              <a className="font-semibold text-[var(--fm-text-primary)] underline" href="mailto:synaptosystemsofficial@gmail.com">
+                synaptosystemsofficial@gmail.com
               </a>
               .
             </p>

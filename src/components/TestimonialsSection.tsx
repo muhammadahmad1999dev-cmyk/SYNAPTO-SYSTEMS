@@ -159,13 +159,13 @@ export default function TestimonialsSection() {
         <MarqueeRow items={ROW_TWO} reverse />
       </div>
       <div className="relative z-[1] mt-12 flex justify-center px-6">
-        <a
+        {/* <a
           href="/testimonials"
           className="inline-flex items-center gap-2.5 rounded-[var(--fm-radius-pill)] border border-[var(--fm-border)] bg-[var(--fm-surface)] px-[26px] py-[13px] font-display text-[15.5px] font-semibold text-[var(--fm-text-primary)] backdrop-blur transition-[transform,background-color,border-color] duration-[var(--fm-motion-component)] hover:-translate-y-0.5 hover:border-[var(--fm-border-accent)] hover:bg-[var(--fm-surface-raised)]"
         >
           View all testimonials
           <ArrowRight className="h-4 w-4" />
-        </a>
+        </a> */}
       </div>
     </section>
   );

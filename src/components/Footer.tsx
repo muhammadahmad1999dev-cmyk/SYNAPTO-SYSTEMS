@@ -54,10 +54,10 @@ export default function Footer() {
               Business formation and operational support for founders building across borders.
             </p>
             <div className="mt-5 flex items-center gap-2.5">
-              <a href="https://www.instagram.com/synaptosystems/" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className={socialClass}>
+              <a href="https://www.instagram.com/synaptosystemsofficial/" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className={socialClass}>
                 <InstagramLogo size={17} />
               </a>
-              <a href="https://www.facebook.com/synaptosystems/" target="_blank" rel="noopener noreferrer" aria-label="Facebook" className={socialClass}>
+              <a href="https://www.facebook.com/people/Synapto-Systems/61591486003942/" target="_blank" rel="noopener noreferrer" aria-label="Facebook" className={socialClass}>
                 <FacebookLogo size={17} />
               </a>
              

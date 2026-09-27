@@ -390,14 +390,14 @@ function DashboardPageContent() {
             </span>
           </a>
           <a
-            href="mailto:support@synaptosystems.com"
+            href="mailto:synaptosystemsofficial@gmail.com"
             className="flex items-center gap-3 rounded-[var(--fm-radius-md)] border border-[var(--fm-border-soft)] bg-[var(--fm-surface)] px-3 py-2.5"
           >
             <Mail size={18} className="text-[var(--fm-text-secondary)]" />
             <span>
               <span className="block text-xs font-medium">Email Support</span>
               <span className="block font-mono text-[10px] text-[var(--fm-text-tertiary)]">
-                support@synaptosystems.com
+                synaptosystemsofficial@gmail.com
               </span>
             </span>
           </a>
@@ -949,7 +949,7 @@ function DashboardSupport({ faqOpen, setFaqOpen }: any) {
           icon={Mail}
           title="Email Support"
           text="Send us your question and our team can review it."
-            href="mailto:support@synaptosystems.com"
+            href="mailto:synaptosystemsofficial@gmail.com"
         />
       </div>
       <DashboardPanel

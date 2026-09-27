@@ -63,7 +63,7 @@ export default function SupportPage() {
               </span>
             </Card>
           </a>
-          <a href="mailto:support@synaptosystems.com" className="group">
+          <a href="mailto:synaptosystemsofficial@gmail.com" className="group">
             <Card variant="interactive" className="h-full p-6">
               <Mail className="text-[var(--fm-lime)]" size={24} />
               <h3 className="mt-4 font-semibold">Email Support</h3>
