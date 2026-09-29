@@ -91,9 +91,9 @@ export default function Footer() {
               <a href="tel:+14064792101" className="hover:text-[var(--fm-text-primary)]">
                 +1 406 4792101
               </a>
-              <a href="tel:+923173070894" className="hover:text-[var(--fm-text-primary)]">
+              {/* <a href="tel:+923173070894" className="hover:text-[var(--fm-text-primary)]">
                 +92 317 3070894
-              </a>
+              </a> */}
             </div>
           </section>
         </div>

@@ -374,7 +374,7 @@ function DashboardPageContent() {
             Need help?
           </p>
           <a
-            href="https://wa.me/923164466335"
+            href="https://wa.me/14064792101"
             target="_blank"
             rel="noreferrer"
             className="mb-3 flex items-center gap-3 rounded-[var(--fm-radius-md)] border border-[var(--fm-border-soft)] bg-[var(--fm-surface)] px-3 py-2.5"
@@ -385,7 +385,7 @@ function DashboardPageContent() {
                 WhatsApp
               </span>
               <span className="block font-mono text-[10px] text-[var(--fm-text-tertiary)]">
-                +92 3173070894
+                +1 (406) 4792101
               </span>
             </span>
           </a>
